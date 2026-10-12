@@ -1,6 +1,6 @@
 local m, s, s2
 
-m = Map("clusterduckd", translate("MeshBeacon"),
+m = Map("clusterduckd", translate("MeshBeacon Uplink"),
 	translate("Configure the SX130x concentrator interface, region frequency "
 		.. "preset and the MQTT uplink used by the ClusterDuck Protocol "
 		.. "gateway daemon (clusterduckd). MQTT topic configuration is not "
