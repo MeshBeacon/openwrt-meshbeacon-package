@@ -6,5 +6,5 @@ function index()
 	end
 
 	entry({"admin", "services", "clusterduckd"},
-		cbi("clusterduckd"), _("ClusterDuck Gateway"), 60).dependent = true
+		cbi("clusterduckd"), _("MeshBeacon Uplink"), 60).dependent = true
 end
