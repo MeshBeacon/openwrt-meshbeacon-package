@@ -33,6 +33,18 @@ No Makefile edits are needed to switch targets -- just drop the package
 directories into whichever SDK you're building against, matching step 2
 below.
 
+### CI builds
+
+[.github/workflows/build.yml](.github/workflows/build.yml) builds both
+architectures on every push to `main` / manual run: `ramips/mt76x8`
+(mipsel-24kec) and `bcm27xx/bcm2711` (arm64, e.g. Raspberry Pi 4). Both
+`.ipk` files are uploaded as workflow artifacts and, outside of pull
+requests, published as assets on a GitHub Release tagged with the
+clusterduckd version being built (e.g. `v1.2.2` — either the version
+pinned in the Makefile, or the `clusterduckd_version` input/"latest" when
+manually dispatched). Re-running the workflow for an already-released
+version reuses that release and replaces its `.ipk` assets.
+
 ## 2. Drop the packages into the SDK
 
 From the SDK root:

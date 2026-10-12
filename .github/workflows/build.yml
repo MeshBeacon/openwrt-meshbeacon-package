@@ -1,16 +1,16 @@
 name: Build OpenWrt packages
 
 # This repo only holds the package *sources* (Makefiles, UCI config, init
-# script, LuCI files) -- not the OpenWrt SDK. The SDK (~50-100MB) is
-# downloaded fresh from downloads.openwrt.org and cached by actions/cache,
-# so normal runs restore it from cache instead of re-downloading/extracting
-# it every time.
+# script, LuCI files) -- not the OpenWrt SDK. Each matrix target's SDK
+# (~50-100MB) is downloaded fresh from downloads.openwrt.org and cached by
+# actions/cache, so normal runs restore it from cache instead of
+# re-downloading/extracting it every time.
 #
-# This workflow targets the ramips/mt76x8 (mipsel) SDK below. The
-# clusterduckd Makefile also supports aarch64 targets (it auto-selects the
-# arm64 release asset via $(ARCH)) -- to build against an arm64 board
-# instead, change OPENWRT_TARGET/OPENWRT_SUBTARGET/SDK_GCC_SUFFIX to match
-# that target's SDK and ARCH_DIR to its bin/packages/<arch> directory name.
+# Builds both a mipsel-24kec .ipk (ramips/mt76x8, e.g. MT76x8 routers) and
+# an arm64/aarch64 .ipk (bcm27xx/bcm2711, e.g. Raspberry Pi 4) -- the
+# clusterduckd Makefile auto-selects the matching upstream release asset
+# via $(ARCH). On push to main / workflow_dispatch (not pull_request), both
+# .ipk files are also published as assets on a GitHub Release.
 #
 # clusterduckd ships with `option enabled '0'` by default, so the built
 # .ipk installs with the service disabled until enabled via UCI/LuCI.
@@ -36,14 +36,79 @@ on:
 
 env:
   OPENWRT_VERSION: "21.02.3"
-  OPENWRT_TARGET: ramips
-  OPENWRT_SUBTARGET: mt76x8
-  SDK_GCC_SUFFIX: "gcc-8.4.0_musl"
-  ARCH_DIR: mipsel_24kc
 
 jobs:
-  build:
+  create-release:
+    if: ${{ github.event_name != 'pull_request' }}
     runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+    outputs:
+      tag: ${{ steps.version.outputs.tag }}
+    steps:
+      - name: Checkout package feed
+        uses: actions/checkout@v4
+
+      # Tags the release by the clusterduckd version being built (e.g.
+      # "v1.2.2"), not the run number -- either the requested
+      # workflow_dispatch version/"latest", or the version already pinned
+      # in the checked-in Makefile.
+      - name: Determine clusterduckd version being built
+        id: version
+        env:
+          REQUESTED_VERSION: ${{ github.event.inputs.clusterduckd_version }}
+        run: |
+          set -e
+          if [ -n "$REQUESTED_VERSION" ]; then
+            TAG="$REQUESTED_VERSION"
+            if [ "$TAG" = "latest" ]; then
+              TAG=$(curl -fsSL https://api.github.com/repos/MeshBeacon/meshbeacon-uplink/releases/latest | jq -r .tag_name)
+            fi
+            VERSION="${TAG#v}"
+          else
+            VERSION=$(sed -n 's/^PKG_VERSION:=\(.*\)/\1/p' package/network/services/clusterduckd/Makefile)
+          fi
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "tag=v${VERSION}" >> "$GITHUB_OUTPUT"
+
+      # Re-running the workflow for a version that's already been released
+      # (e.g. a doc-only follow-up commit) just reuses the existing release;
+      # the build job's --clobber upload replaces its .ipk assets.
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="${{ steps.version.outputs.tag }}"
+          if gh release view "$TAG" --repo "${{ github.repository }}" >/dev/null 2>&1; then
+            echo "Release $TAG already exists; build job will update its assets."
+          else
+            gh release create "$TAG" \
+              --repo "${{ github.repository }}" \
+              --title "clusterduckd $TAG" \
+              --notes "Automated .ipk build of clusterduckd $TAG (commit ${{ github.sha }})." \
+              --prerelease
+          fi
+
+  build:
+    needs: [create-release]
+    if: ${{ always() && !cancelled() && (needs.create-release.result == 'success' || needs.create-release.result == 'skipped') }}
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: ramips
+            subtarget: mt76x8
+            sdk_gcc_suffix: "gcc-8.4.0_musl"
+            arch_suffix: linux-mipsel-24kec
+            artifact_label: mipsel-24kec
+          - target: bcm27xx
+            subtarget: bcm2711
+            sdk_gcc_suffix: "gcc-8.4.0_musl"
+            arch_suffix: linux-arm64
+            artifact_label: arm64
     steps:
       - name: Checkout package feed
         uses: actions/checkout@v4
@@ -51,20 +116,20 @@ jobs:
       - name: Resolve SDK name/URL
         id: sdk
         run: |
-          SDK_NAME="openwrt-sdk-${OPENWRT_VERSION}-${OPENWRT_TARGET}-${OPENWRT_SUBTARGET}_${SDK_GCC_SUFFIX}.Linux-x86_64"
-          SDK_URL="https://downloads.openwrt.org/releases/${OPENWRT_VERSION}/targets/${OPENWRT_TARGET}/${OPENWRT_SUBTARGET}/${SDK_NAME}.tar.xz"
+          SDK_NAME="openwrt-sdk-${OPENWRT_VERSION}-${{ matrix.target }}-${{ matrix.subtarget }}_${{ matrix.sdk_gcc_suffix }}.Linux-x86_64"
+          SDK_URL="https://downloads.openwrt.org/releases/${OPENWRT_VERSION}/targets/${{ matrix.target }}/${{ matrix.subtarget }}/${SDK_NAME}.tar.xz"
           echo "sdk_name=${SDK_NAME}" >> "$GITHUB_OUTPUT"
           echo "sdk_url=${SDK_URL}" >> "$GITHUB_OUTPUT"
           echo "sdk_dir=${{ github.workspace }}/sdk/${SDK_NAME}" >> "$GITHUB_OUTPUT"
 
-      # Cached by a fixed key (the release's SDK tarball never changes), so
-      # after the first run this step is a no-op and no SDK download happens.
+      # Cached by a fixed key (a given release's SDK tarball never changes),
+      # so after the first run per target this step is a no-op.
       - name: Cache OpenWrt SDK
         id: cache-sdk
         uses: actions/cache@v4
         with:
           path: sdk/${{ steps.sdk.outputs.sdk_name }}
-          key: openwrt-sdk-${{ env.OPENWRT_VERSION }}-${{ env.OPENWRT_TARGET }}-${{ env.OPENWRT_SUBTARGET }}-${{ env.SDK_GCC_SUFFIX }}-v1
+          key: openwrt-sdk-${{ env.OPENWRT_VERSION }}-${{ matrix.target }}-${{ matrix.subtarget }}-${{ matrix.sdk_gcc_suffix }}-v1
 
       - name: Download and extract SDK
         if: steps.cache-sdk.outputs.cache-hit != 'true'
@@ -88,6 +153,7 @@ jobs:
         working-directory: ${{ steps.sdk.outputs.sdk_dir }}
         env:
           REQUESTED_VERSION: ${{ github.event.inputs.clusterduckd_version }}
+          ARCH_SUFFIX: ${{ matrix.arch_suffix }}
         run: |
           set -e
           TAG="$REQUESTED_VERSION"
@@ -95,7 +161,7 @@ jobs:
             TAG=$(curl -fsSL https://api.github.com/repos/MeshBeacon/meshbeacon-uplink/releases/latest | jq -r .tag_name)
           fi
           VERSION="${TAG#v}"
-          ASSET="clusterduckd-${TAG}-linux-mipsel-24kec"
+          ASSET="clusterduckd-${TAG}-${ARCH_SUFFIX}"
           URL="https://github.com/MeshBeacon/meshbeacon-uplink/releases/download/${TAG}/${ASSET}"
 
           echo "Resolved clusterduckd ${TAG} (${URL})"
@@ -105,10 +171,13 @@ jobs:
 
           MAKEFILE=package/network/services/clusterduckd/Makefile
           sed -i "s/^PKG_VERSION:=.*/PKG_VERSION:=${VERSION}/" "$MAKEFILE"
-          # This workflow always builds the mipsel/ramips SDK, so only the
-          # mipsel branch (between 'else' and 'endif') needs patching --
-          # the aarch64 branch's pinned asset/hash is left untouched.
-          sed -i "/^else/,/^endif/{s/^\(\s*PKG_SOURCE:=\).*/\1${ASSET}/; s/^\(\s*PKG_HASH:=\).*/\1${HASH}/}" "$MAKEFILE"
+          # Only patch the branch matching this matrix job's architecture,
+          # leaving the other architecture's pinned asset/hash untouched.
+          if [ "$ARCH_SUFFIX" = "linux-arm64" ]; then
+            sed -i "/^ifeq (\$(ARCH),aarch64)/,/^else/{s/^\(\s*PKG_SOURCE:=\).*/\1${ASSET}/; s/^\(\s*PKG_HASH:=\).*/\1${HASH}/}" "$MAKEFILE"
+          else
+            sed -i "/^else/,/^endif/{s/^\(\s*PKG_SOURCE:=\).*/\1${ASSET}/; s/^\(\s*PKG_HASH:=\).*/\1${HASH}/}" "$MAKEFILE"
+          fi
 
       - name: make defconfig
         working-directory: ${{ steps.sdk.outputs.sdk_dir }}
@@ -122,9 +191,29 @@ jobs:
         working-directory: ${{ steps.sdk.outputs.sdk_dir }}
         run: make package/network/services/luci-app-clusterduckd/{clean,compile} V=s
 
+      # The exact bin/packages/<arch>/ directory name (e.g. mipsel_24kc,
+      # aarch64_cortex-a72) comes from each target's own SDK config, not
+      # something we should hardcode per matrix entry.
+      - name: Resolve built package arch directory
+        id: pkgarch
+        working-directory: ${{ steps.sdk.outputs.sdk_dir }}
+        run: |
+          ARCH_PACKAGES=$(sed -n 's/^CONFIG_TARGET_ARCH_PACKAGES="\(.*\)"/\1/p' .config)
+          echo "arch_packages=${ARCH_PACKAGES}" >> "$GITHUB_OUTPUT"
+
       - name: Upload .ipk artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: clusterduckd-ipk-${{ env.ARCH_DIR }}
-          path: sdk/${{ steps.sdk.outputs.sdk_name }}/bin/packages/${{ env.ARCH_DIR }}/base/*.ipk
+          name: clusterduckd-ipk-${{ matrix.artifact_label }}
+          path: sdk/${{ steps.sdk.outputs.sdk_name }}/bin/packages/${{ steps.pkgarch.outputs.arch_packages }}/base/*.ipk
           if-no-files-found: error
+
+      - name: Publish .ipk to GitHub Release
+        if: ${{ github.event_name != 'pull_request' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release upload "${{ needs.create-release.outputs.tag }}" \
+            --repo "${{ github.repository }}" \
+            --clobber \
+            sdk/${{ steps.sdk.outputs.sdk_name }}/bin/packages/${{ steps.pkgarch.outputs.arch_packages }}/base/*.ipk
