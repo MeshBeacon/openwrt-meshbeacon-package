@@ -34,6 +34,19 @@ No Makefile edits are needed to switch targets -- just drop the package
 directories into whichever SDK you're building against, matching step 2
 below.
 
+### Supported hardware
+
+Any device running OpenWrt 21.02.3 on one of the architectures above should
+work. Known/expected-compatible LoRa gateway hardware includes:
+
+- Seeed Studio SenseCAP M2
+- Seeed Studio SenseCAP reComputer R1225
+- All Dragino LoRa gateways
+- ChirpStack Gateway OS devices
+- RAK Wireless RAK2247 / RAK833
+- Lansitec 8-Channel Indoor LoRaWAN Gateway
+- Any ARM64-based SBC (e.g. Raspberry Pi 4)
+
 ### CI builds
 
 [.github/workflows/build.yml](.github/workflows/build.yml) builds all three
