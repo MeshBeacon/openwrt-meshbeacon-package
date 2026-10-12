@@ -47,6 +47,12 @@ work. Known/expected-compatible LoRa gateway hardware includes:
 - Lansitec 8-Channel Indoor LoRaWAN Gateway
 - Any ARM64-based SBC (e.g. Raspberry Pi 4)
 
+> **Note:** match the hardware's SoC to the architecture row above --
+> Lansitec 8-Channel Indoor LoRaWAN Gateway, SenseCAP M2, and RAK Wireless
+> boards running Ralink/MT7628 (MIPS 24KEc) use `mipsel`; Draginos on
+> Atheros AR9331 (MIPS 24Kc) use `mips`; reComputer R1225 and ChirpStack
+> Gateway OS on Raspberry Pi 4 (ARM64) use `aarch64`.
+
 ### CI builds
 
 [.github/workflows/build.yml](.github/workflows/build.yml) builds all three
