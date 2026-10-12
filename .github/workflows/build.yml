@@ -5,6 +5,15 @@ name: Build OpenWrt packages
 # downloaded fresh from downloads.openwrt.org and cached by actions/cache,
 # so normal runs restore it from cache instead of re-downloading/extracting
 # it every time.
+#
+# This workflow targets the ramips/mt76x8 (mipsel) SDK below. The
+# clusterduckd Makefile also supports aarch64 targets (it auto-selects the
+# arm64 release asset via $(ARCH)) -- to build against an arm64 board
+# instead, change OPENWRT_TARGET/OPENWRT_SUBTARGET/SDK_GCC_SUFFIX to match
+# that target's SDK and ARCH_DIR to its bin/packages/<arch> directory name.
+#
+# clusterduckd ships with `option enabled '0'` by default, so the built
+# .ipk installs with the service disabled until enabled via UCI/LuCI.
 
 on:
   push:
@@ -95,7 +104,10 @@ jobs:
 
           MAKEFILE=package/network/services/clusterduckd/Makefile
           sed -i "s/^PKG_VERSION:=.*/PKG_VERSION:=${VERSION}/" "$MAKEFILE"
-          sed -i "s/^PKG_HASH:=.*/PKG_HASH:=${HASH}/" "$MAKEFILE"
+          # This workflow always builds the mipsel/ramips SDK, so only the
+          # mipsel branch (between 'else' and 'endif') needs patching --
+          # the aarch64 branch's pinned asset/hash is left untouched.
+          sed -i "/^else/,/^endif/{s/^\(\s*PKG_SOURCE:=\).*/\1${ASSET}/; s/^\(\s*PKG_HASH:=\).*/\1${HASH}/}" "$MAKEFILE"
 
       - name: make defconfig
         working-directory: ${{ steps.sdk.outputs.sdk_dir }}

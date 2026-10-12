@@ -18,6 +18,21 @@ If you already have this SDK checked out elsewhere (e.g.
 `~/Projects/openwrt-sdk-21.02.3-ramips-mt76x8_gcc-8.4.0_musl.Linux-x86_64`),
 you can reuse it directly and skip the download.
 
+### Architecture support
+
+`package/network/services/clusterduckd/Makefile` picks the upstream prebuilt
+binary automatically based on the SDK's target architecture (`$(ARCH)`,
+derived from the SDK's own `CONFIG_ARCH`):
+
+| SDK target arch | Binary fetched |
+| --- | --- |
+| `mipsel` (e.g. ramips/mt76x8) | `clusterduckd-vX.Y.Z-linux-mipsel-24kec` |
+| `aarch64` (any arm64 target) | `clusterduckd-vX.Y.Z-linux-arm64` |
+
+No Makefile edits are needed to switch targets -- just drop the package
+directories into whichever SDK you're building against, matching step 2
+below.
+
 ## 2. Drop the packages into the SDK
 
 From the SDK root:
@@ -72,6 +87,23 @@ ls bin/packages/mipsel_24kc/base/clusterduckd*.ipk
 ls bin/packages/mipsel_24kc/base/luci-app-clusterduckd*.ipk
 ```
 
+(Substitute `mipsel_24kc` with the matching `bin/packages/<arch>/base/`
+directory if you built against an arm64 SDK instead.)
+
+## Service is disabled by default
+
+The daemon ships with `option enabled '0'` in `/etc/config/clusterduckd` and
+`start_service()` returns immediately unless it's set to `1`. After
+installing the `.ipk`, enable it either via LuCI (tick **Enable** under
+*ClusterDuck Gateway → General* and save) or manually:
+
+```sh
+uci set clusterduckd.settings.enabled='1'
+uci commit clusterduckd
+/etc/init.d/clusterduckd enable
+/etc/init.d/clusterduckd start
+```
+
 ## 5. (Optional) Inspect an .ipk without installing it
 
 `.ipk` files are `ar` archives containing `control.tar.gz` and
@@ -96,12 +128,21 @@ will fail verification):
 ```bash
 VERSION=1.2.3
 TAG="v$VERSION"
-ASSET="clusterduckd-${TAG}-linux-mipsel-24kec"
+ARCH_SUFFIX=linux-mipsel-24kec   # use linux-arm64 for an aarch64 SDK
+ASSET="clusterduckd-${TAG}-${ARCH_SUFFIX}"
 HASH=$(curl -fsSL "https://github.com/MeshBeacon/meshbeacon-uplink/releases/download/${TAG}/${ASSET}" | sha256sum | cut -d' ' -f1)
 
-sed -i "s/^PKG_VERSION:=.*/PKG_VERSION:=${VERSION}/" package/network/services/clusterduckd/Makefile
-sed -i "s/^PKG_HASH:=.*/PKG_HASH:=${HASH}/" package/network/services/clusterduckd/Makefile
+MAKEFILE=package/network/services/clusterduckd/Makefile
+sed -i "s/^PKG_VERSION:=.*/PKG_VERSION:=${VERSION}/" "$MAKEFILE"
+# Only patch the branch (ifeq/aarch64 or else/mipsel) matching $ARCH_SUFFIX,
+# leaving the other architecture's pinned asset/hash untouched:
+if [ "$ARCH_SUFFIX" = "linux-arm64" ]; then
+  sed -i "/^ifeq (\$(ARCH),aarch64)/,/^else/{s/^\(\s*PKG_SOURCE:=\).*/\1${ASSET}/; s/^\(\s*PKG_HASH:=\).*/\1${HASH}/}" "$MAKEFILE"
+else
+  sed -i "/^else/,/^endif/{s/^\(\s*PKG_SOURCE:=\).*/\1${ASSET}/; s/^\(\s*PKG_HASH:=\).*/\1${HASH}/}" "$MAKEFILE"
+fi
 ```
 
 This is exactly what [.github/workflows/build.yml](.github/workflows/build.yml) automates in CI via the
-`clusterduckd_version` workflow input.
+`clusterduckd_version` workflow input (for the mipsel/ramips branch that the
+workflow targets).

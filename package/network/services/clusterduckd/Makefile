@@ -11,9 +11,18 @@ PKG_NAME:=clusterduckd
 PKG_VERSION:=1.2.2
 PKG_RELEASE:=1
 
-PKG_SOURCE:=clusterduckd-v$(PKG_VERSION)-linux-mipsel-24kec
 PKG_SOURCE_URL:=https://github.com/MeshBeacon/meshbeacon-uplink/releases/download/v$(PKG_VERSION)
-PKG_HASH:=a0977237bfa902e28c0fb175054aa39631075380ab29ad9f548c09e7e439f6b4
+
+# Upstream ships separate prebuilt static binaries per CPU architecture.
+# $(ARCH) is set by rules.mk from CONFIG_ARCH (e.g. "mipsel" for ramips/
+# mt76x8, "aarch64" for arm64 targets).
+ifeq ($(ARCH),aarch64)
+  PKG_SOURCE:=clusterduckd-v$(PKG_VERSION)-linux-arm64
+  PKG_HASH:=f5d68cd4ee24fffee2db46066feb8f90e40116447e8d69ba9cc91a1cf291f936
+else
+  PKG_SOURCE:=clusterduckd-v$(PKG_VERSION)-linux-mipsel-24kec
+  PKG_HASH:=a0977237bfa902e28c0fb175054aa39631075380ab29ad9f548c09e7e439f6b4
+endif
 
 PKG_MAINTAINER:=
 PKG_LICENSE:=BSD-3-Clause
@@ -33,8 +42,9 @@ define Package/clusterduckd/description
   concentrator gateway daemon. It receives packets from a ClusterDuck mesh
   network via a SX1302/SX1250 concentrator (USB or SPI) and forwards them to
   an MQTT broker.
-  This package ships the prebuilt statically-linked mipsel-24kec (MT76x8)
-  binary from the upstream v1.2.2 release, together with a UCI configuration
+  This package ships the prebuilt statically-linked binary from the
+  upstream v1.2.2 release matching the target architecture (mipsel-24kec
+  for MT76x8, arm64 for aarch64 targets), together with a UCI configuration
   and init script which generate /etc/clusterduckd/global_conf.json.
 endef
 

@@ -7,6 +7,16 @@ m = Map("clusterduckd", translate("ClusterDuck Gateway"),
 		.. "exposed here and must be edited directly in "
 		.. "/etc/clusterduckd/global_conf.json."))
 
+local s0 = m:section(TypedSection, "clusterduckd", translate("General"))
+s0.anonymous = true
+
+local enabled = s0:option(Flag, "enabled", translate("Enable"),
+	translate("Start the clusterduckd gateway daemon. Disabled by default -- "
+		.. "enable once the concentrator interface and MQTT settings below "
+		.. "are configured."))
+enabled.default = enabled.disabled
+enabled.rmempty = false
+
 s = m:section(TypedSection, "clusterduckd", translate("Concentrator"))
 s.anonymous = true
 
