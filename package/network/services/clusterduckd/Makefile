@@ -1,0 +1,75 @@
+#
+# Copyright (C) 2026
+#
+# This is free software, licensed under the GNU General Public License v2.
+# See /LICENSE for more information.
+#
+
+include $(TOPDIR)/rules.mk
+
+PKG_NAME:=clusterduckd
+PKG_VERSION:=1.2.2
+PKG_RELEASE:=1
+
+PKG_SOURCE:=clusterduckd-v$(PKG_VERSION)-linux-mipsel-24kec
+PKG_SOURCE_URL:=https://github.com/MeshBeacon/meshbeacon-uplink/releases/download/v$(PKG_VERSION)
+PKG_HASH:=a0977237bfa902e28c0fb175054aa39631075380ab29ad9f548c09e7e439f6b4
+
+PKG_MAINTAINER:=
+PKG_LICENSE:=BSD-3-Clause
+
+include $(INCLUDE_DIR)/package.mk
+
+define Package/clusterduckd
+  SECTION:=net
+  CATEGORY:=Network
+  TITLE:=ClusterDuck Protocol PapaDuck gateway daemon
+  URL:=https://github.com/MeshBeacon/meshbeacon-uplink
+  DEPENDS:=+jshn
+endef
+
+define Package/clusterduckd/description
+  clusterduckd is the ClusterDuck Protocol "SuperDuck"/PapaDuck LoRa
+  concentrator gateway daemon. It receives packets from a ClusterDuck mesh
+  network via a SX1302/SX1250 concentrator (USB or SPI) and forwards them to
+  an MQTT broker.
+  This package ships the prebuilt statically-linked mipsel-24kec (MT76x8)
+  binary from the upstream v1.2.2 release, together with a UCI configuration
+  and init script which generate /etc/clusterduckd/global_conf.json.
+endef
+
+# Prebuilt binary release: nothing to compile, just download and install it.
+define Download/clusterduckd
+  URL:=$(PKG_SOURCE_URL)
+  URL_FILE:=$(PKG_SOURCE)
+  FILE:=$(PKG_SOURCE)
+  HASH:=$(PKG_HASH)
+endef
+
+define Build/Prepare
+endef
+
+define Build/Compile
+endef
+
+define Package/clusterduckd/conffiles
+/etc/config/clusterduckd
+/etc/clusterduckd/global_conf.json
+endef
+
+define Package/clusterduckd/install
+	$(INSTALL_DIR) $(1)/usr/sbin
+	$(INSTALL_BIN) $(DL_DIR)/$(PKG_SOURCE) $(1)/usr/sbin/clusterduckd
+
+	$(INSTALL_DIR) $(1)/etc/clusterduckd
+	$(INSTALL_DATA) ./files/global_conf.json $(1)/etc/clusterduckd/global_conf.json
+
+	$(INSTALL_DIR) $(1)/etc/config
+	$(INSTALL_CONF) ./files/clusterduckd.config $(1)/etc/config/clusterduckd
+
+	$(INSTALL_DIR) $(1)/etc/init.d
+	$(INSTALL_BIN) ./files/clusterduckd.init $(1)/etc/init.d/clusterduckd
+endef
+
+$(eval $(call Download,clusterduckd))
+$(eval $(call BuildPackage,clusterduckd))

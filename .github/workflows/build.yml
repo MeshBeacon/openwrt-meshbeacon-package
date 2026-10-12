@@ -1,0 +1,117 @@
+name: Build OpenWrt packages
+
+# This repo only holds the package *sources* (Makefiles, UCI config, init
+# script, LuCI files) -- not the OpenWrt SDK. The SDK (~50-100MB) is
+# downloaded fresh from downloads.openwrt.org and cached by actions/cache,
+# so normal runs restore it from cache instead of re-downloading/extracting
+# it every time.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "package/**"
+      - ".github/workflows/build.yml"
+  pull_request:
+    paths:
+      - "package/**"
+  workflow_dispatch:
+    inputs:
+      clusterduckd_version:
+        description: >
+          clusterduckd release tag to build, e.g. "v1.2.3". Use "latest" to
+          resolve the newest GitHub release at build time. Leave empty to
+          use the version already pinned in the package Makefile.
+        required: false
+        default: ""
+
+env:
+  OPENWRT_VERSION: "21.02.3"
+  OPENWRT_TARGET: ramips
+  OPENWRT_SUBTARGET: mt76x8
+  SDK_GCC_SUFFIX: "gcc-8.4.0_musl"
+  ARCH_DIR: mipsel_24kc
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout package feed
+        uses: actions/checkout@v4
+
+      - name: Resolve SDK name/URL
+        id: sdk
+        run: |
+          SDK_NAME="openwrt-sdk-${OPENWRT_VERSION}-${OPENWRT_TARGET}-${OPENWRT_SUBTARGET}_${SDK_GCC_SUFFIX}.Linux-x86_64"
+          SDK_URL="https://downloads.openwrt.org/releases/${OPENWRT_VERSION}/targets/${OPENWRT_TARGET}/${OPENWRT_SUBTARGET}/${SDK_NAME}.tar.xz"
+          echo "sdk_name=${SDK_NAME}" >> "$GITHUB_OUTPUT"
+          echo "sdk_url=${SDK_URL}" >> "$GITHUB_OUTPUT"
+          echo "sdk_dir=${{ github.workspace }}/sdk/${SDK_NAME}" >> "$GITHUB_OUTPUT"
+
+      # Cached by a fixed key (the release's SDK tarball never changes), so
+      # after the first run this step is a no-op and no SDK download happens.
+      - name: Cache OpenWrt SDK
+        id: cache-sdk
+        uses: actions/cache@v4
+        with:
+          path: sdk/${{ steps.sdk.outputs.sdk_name }}
+          key: openwrt-sdk-${{ env.OPENWRT_VERSION }}-${{ env.OPENWRT_TARGET }}-${{ env.OPENWRT_SUBTARGET }}-${{ env.SDK_GCC_SUFFIX }}-v1
+
+      - name: Download and extract SDK
+        if: steps.cache-sdk.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p sdk
+          curl -fL --retry 5 "${{ steps.sdk.outputs.sdk_url }}" -o /tmp/sdk.tar.xz
+          tar -C sdk -xJf /tmp/sdk.tar.xz
+
+      - name: Drop our packages into the SDK tree
+        run: |
+          rm -rf "${{ steps.sdk.outputs.sdk_dir }}/package/network/services/clusterduckd"
+          rm -rf "${{ steps.sdk.outputs.sdk_dir }}/package/network/services/luci-app-clusterduckd"
+          cp -r package/network/services/clusterduckd "${{ steps.sdk.outputs.sdk_dir }}/package/network/services/"
+          cp -r package/network/services/luci-app-clusterduckd "${{ steps.sdk.outputs.sdk_dir }}/package/network/services/"
+
+      # Overrides PKG_VERSION/PKG_HASH for this run only -- the checked-in
+      # Makefile keeps its own pinned default and is never modified.
+      - name: Resolve clusterduckd version override
+        if: ${{ github.event.inputs.clusterduckd_version != '' }}
+        working-directory: ${{ steps.sdk.outputs.sdk_dir }}
+        env:
+          REQUESTED_VERSION: ${{ github.event.inputs.clusterduckd_version }}
+        run: |
+          set -e
+          TAG="$REQUESTED_VERSION"
+          if [ "$TAG" = "latest" ]; then
+            TAG=$(curl -fsSL https://api.github.com/repos/MeshBeacon/meshbeacon-uplink/releases/latest | jq -r .tag_name)
+          fi
+          VERSION="${TAG#v}"
+          ASSET="clusterduckd-${TAG}-linux-mipsel-24kec"
+          URL="https://github.com/MeshBeacon/meshbeacon-uplink/releases/download/${TAG}/${ASSET}"
+
+          echo "Resolved clusterduckd ${TAG} (${URL})"
+          mkdir -p dl
+          curl -fL --retry 5 "$URL" -o "dl/${ASSET}"
+          HASH=$(sha256sum "dl/${ASSET}" | cut -d' ' -f1)
+
+          MAKEFILE=package/network/services/clusterduckd/Makefile
+          sed -i "s/^PKG_VERSION:=.*/PKG_VERSION:=${VERSION}/" "$MAKEFILE"
+          sed -i "s/^PKG_HASH:=.*/PKG_HASH:=${HASH}/" "$MAKEFILE"
+
+      - name: make defconfig
+        working-directory: ${{ steps.sdk.outputs.sdk_dir }}
+        run: make defconfig
+
+      - name: Build clusterduckd
+        working-directory: ${{ steps.sdk.outputs.sdk_dir }}
+        run: make package/network/services/clusterduckd/{clean,compile} V=s
+
+      - name: Build luci-app-clusterduckd
+        working-directory: ${{ steps.sdk.outputs.sdk_dir }}
+        run: make package/network/services/luci-app-clusterduckd/{clean,compile} V=s
+
+      - name: Upload .ipk artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: clusterduckd-ipk-${{ env.ARCH_DIR }}
+          path: sdk/${{ steps.sdk.outputs.sdk_name }}/bin/packages/${{ env.ARCH_DIR }}/base/*.ipk
+          if-no-files-found: error

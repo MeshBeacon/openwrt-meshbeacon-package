@@ -1,0 +1,11 @@
+{
+	"luci-app-clusterduckd": {
+		"description": "Grant UCI access for luci-app-clusterduckd",
+		"read": {
+			"uci": ["clusterduckd"]
+		},
+		"write": {
+			"uci": ["clusterduckd"]
+		}
+	}
+}

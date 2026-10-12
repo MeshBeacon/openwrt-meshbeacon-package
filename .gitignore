@@ -1,0 +1,9 @@
+dl/
+build_dir/
+staging_dir/
+bin/
+tmp/
+.config
+.config.old
+sdk/
+*.ipk

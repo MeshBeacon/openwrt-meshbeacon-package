@@ -1,0 +1,164 @@
+#!/bin/sh /etc/rc.common
+
+START=95
+STOP=10
+
+USE_PROCD=1
+
+PROG=/usr/sbin/clusterduckd
+CONF_DIR=/etc/clusterduckd
+CONF_FILE="$CONF_DIR/global_conf.json"
+
+. /lib/functions.sh
+. /usr/share/libubox/jshn.sh
+
+# Representative per-region frequency presets (Hz), mirroring the duck
+# firmware's RadioRegionConfig.cpp PRESETS table: 9 LBT scan channels (the
+# firmware's 8-entry uplink pool plus one extra channel one step below the
+# lowest pool entry), radio_0/radio_1 center frequencies and the radio_0 TX
+# range. Not regulator-verified -- see the CBI help text. Falls back to MY
+# (Malaysia, AS923) if an unrecognized code is stored.
+set_region_freqs() {
+	case "$1" in
+	SG|PH)
+		# AS923 (SG/PH): mesh 923.2MHz, pool 923.2-921.8MHz
+		CHAN_FREQS="923200000 923000000 922800000 922600000 922400000 922200000 922000000 921800000 921600000"
+		RADIO0_FREQ=922900000
+		RADIO1_FREQ=922100000
+		TX_FREQ_MIN=921600000
+		TX_FREQ_MAX=923200000
+		;;
+	ID)
+		# AS923 (ID): mesh 916.8MHz, pool 916.8-915.4MHz
+		CHAN_FREQS="916800000 916600000 916400000 916200000 916000000 915800000 915600000 915400000 915200000"
+		RADIO0_FREQ=916500000
+		RADIO1_FREQ=915700000
+		TX_FREQ_MIN=915200000
+		TX_FREQ_MAX=916800000
+		;;
+	US)
+		# US915: mesh 915.2MHz, pool 915.2-913.8MHz
+		CHAN_FREQS="915200000 915000000 914800000 914600000 914400000 914200000 914000000 913800000 913600000"
+		RADIO0_FREQ=914900000
+		RADIO1_FREQ=914100000
+		TX_FREQ_MIN=913600000
+		TX_FREQ_MAX=915200000
+		;;
+	UK|PS)
+		# EU868 (UK, and PS falling back to the common ETSI EU868 plan):
+		# mesh 868.1MHz, pool 868.1-866.7MHz
+		CHAN_FREQS="868100000 867900000 867700000 867500000 867300000 867100000 866900000 866700000 866500000"
+		RADIO0_FREQ=867800000
+		RADIO1_FREQ=867000000
+		TX_FREQ_MIN=866500000
+		TX_FREQ_MAX=868100000
+		;;
+	MY|*)
+		# AS923 (MY, default): mesh 922.8MHz, pool 922.8-921.4MHz
+		CHAN_FREQS="922800000 922600000 922400000 922200000 922000000 921800000 921600000 921400000 921200000"
+		RADIO0_FREQ=922500000
+		RADIO1_FREQ=921700000
+		TX_FREQ_MIN=921200000
+		TX_FREQ_MAX=922800000
+		;;
+	esac
+}
+
+# Merge the LuCI/UCI-exposed options (com_type, com_path, region and
+# mqtt_conf minus topics) into the existing global_conf.json, leaving all
+# other concentrator settings (gateway/debug config, mqtt topics, ...)
+# intact.
+gen_config() {
+	local com_type com_path region
+	local mqtt_enabled mqtt_server mqtt_port mqtt_client_id
+	local mqtt_username mqtt_password mqtt_keepalive mqtt_use_tls mqtt_ca_cert_file
+	local CHAN_FREQS RADIO0_FREQ RADIO1_FREQ TX_FREQ_MIN TX_FREQ_MAX
+
+	config_get com_type settings com_type "USB"
+	config_get com_path settings com_path "/dev/ttyACM0"
+	config_get region settings region "MY"
+	set_region_freqs "$region"
+
+	config_get_bool mqtt_enabled settings mqtt_enabled 1
+	config_get mqtt_server settings mqtt_server ""
+	config_get mqtt_port settings mqtt_port 1883
+	config_get mqtt_client_id settings mqtt_client_id "papa-duck-gateway-1"
+	config_get mqtt_username settings mqtt_username ""
+	config_get mqtt_password settings mqtt_password ""
+	config_get mqtt_keepalive settings mqtt_keepalive 60
+	config_get_bool mqtt_use_tls settings mqtt_use_tls 0
+	config_get mqtt_ca_cert_file settings mqtt_ca_cert_file ""
+
+	[ -f "$CONF_FILE" ] || return 1
+
+	json_init
+	json_load_file "$CONF_FILE"
+
+	json_select SX130x_conf || json_add_object SX130x_conf
+	json_add_string com_type "$com_type"
+	json_add_string com_path "$com_path"
+
+	if json_select lbt_cfg; then
+		if json_select chan_cfg; then
+			local idx=1
+			for freq in $CHAN_FREQS; do
+				json_select "$idx"
+				json_add_int freq_hz "$freq"
+				json_select ..
+				idx=$((idx + 1))
+			done
+			json_select ..
+		fi
+		json_select ..
+	fi
+
+	if json_select radio_0; then
+		json_add_int freq "$RADIO0_FREQ"
+		json_add_int tx_freq_min "$TX_FREQ_MIN"
+		json_add_int tx_freq_max "$TX_FREQ_MAX"
+		json_select ..
+	fi
+
+	if json_select radio_1; then
+		json_add_int freq "$RADIO1_FREQ"
+		json_select ..
+	fi
+
+	json_select ..
+
+	json_select mqtt_conf || json_add_object mqtt_conf
+	json_add_boolean enabled "$mqtt_enabled"
+	json_add_string server "$mqtt_server"
+	json_add_int port "$mqtt_port"
+	json_add_string client_id "$mqtt_client_id"
+	json_add_string username "$mqtt_username"
+	json_add_string password "$mqtt_password"
+	json_add_int keepalive "$mqtt_keepalive"
+	json_add_boolean use_tls "$mqtt_use_tls"
+	json_add_string ca_cert_file "$mqtt_ca_cert_file"
+	json_select ..
+
+	json_dump > "${CONF_FILE}.new" && mv "${CONF_FILE}.new" "$CONF_FILE"
+}
+
+start_service() {
+	config_load clusterduckd
+	gen_config
+
+	procd_open_instance
+	procd_set_param command "$PROG" -c "$CONF_FILE"
+	procd_set_param cwd "$CONF_DIR"
+	procd_set_param respawn
+	procd_set_param stdout 1
+	procd_set_param stderr 1
+	procd_close_instance
+}
+
+reload_service() {
+	stop
+	start
+}
+
+service_triggers() {
+	procd_add_reload_trigger "clusterduckd"
+}
