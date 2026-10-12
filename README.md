@@ -27,6 +27,7 @@ derived from the SDK's own `CONFIG_ARCH`):
 | SDK target arch | Binary fetched |
 | --- | --- |
 | `mipsel` (e.g. ramips/mt76x8) | `clusterduckd-vX.Y.Z-linux-mipsel-24kec` |
+| `mips` (e.g. ath79/generic -- AR9331 boards) | `clusterduckd-vX.Y.Z-linux-mips-24kc` |
 | `aarch64` (any arm64 target) | `clusterduckd-vX.Y.Z-linux-arm64` |
 
 No Makefile edits are needed to switch targets -- just drop the package
@@ -35,15 +36,16 @@ below.
 
 ### CI builds
 
-[.github/workflows/build.yml](.github/workflows/build.yml) builds both
+[.github/workflows/build.yml](.github/workflows/build.yml) builds all three
 architectures on every push to `main` / manual run: `ramips/mt76x8`
-(mipsel-24kec) and `bcm27xx/bcm2711` (arm64, e.g. Raspberry Pi 4). Both
-`.ipk` files are uploaded as workflow artifacts and, outside of pull
-requests, published as assets on a GitHub Release tagged with the
-clusterduckd version being built (e.g. `v1.2.2` — either the version
-pinned in the Makefile, or the `clusterduckd_version` input/"latest" when
-manually dispatched). Re-running the workflow for an already-released
-version reuses that release and replaces its `.ipk` assets.
+(mipsel-24kec), `ath79/generic` (mips-24kc, e.g. AR9331 boards), and
+`bcm27xx/bcm2711` (arm64, e.g. Raspberry Pi 4). All `.ipk` files are
+uploaded as workflow artifacts and, outside of pull requests, published as
+assets on a GitHub Release tagged with the clusterduckd version being built
+(e.g. `v1.2.3` — either the version pinned in the Makefile, or the
+`clusterduckd_version` input/"latest" when manually dispatched). Re-running
+the workflow for an already-released version reuses that release and
+replaces its `.ipk` assets.
 
 ## 2. Drop the packages into the SDK
 
@@ -100,7 +102,8 @@ ls bin/packages/mipsel_24kc/base/luci-app-clusterduckd*.ipk
 ```
 
 (Substitute `mipsel_24kc` with the matching `bin/packages/<arch>/base/`
-directory if you built against an arm64 SDK instead.)
+directory if you built against an ath79/generic (mips-24kc) or arm64 SDK
+instead.)
 
 ## Service is disabled by default
 
@@ -140,21 +143,26 @@ will fail verification):
 ```bash
 VERSION=1.2.3
 TAG="v$VERSION"
-ARCH_SUFFIX=linux-mipsel-24kec   # use linux-arm64 for an aarch64 SDK
+ARCH_SUFFIX=linux-mipsel-24kec   # or linux-mips-24kc (ath79/AR9331), linux-arm64 (aarch64)
 ASSET="clusterduckd-${TAG}-${ARCH_SUFFIX}"
 HASH=$(curl -fsSL "https://github.com/MeshBeacon/meshbeacon-uplink/releases/download/${TAG}/${ASSET}" | sha256sum | cut -d' ' -f1)
 
 MAKEFILE=package/network/services/clusterduckd/Makefile
 sed -i "s/^PKG_VERSION:=.*/PKG_VERSION:=${VERSION}/" "$MAKEFILE"
-# Only patch the branch (ifeq/aarch64 or else/mipsel) matching $ARCH_SUFFIX,
-# leaving the other architecture's pinned asset/hash untouched:
-if [ "$ARCH_SUFFIX" = "linux-arm64" ]; then
-  sed -i "/^ifeq (\$(ARCH),aarch64)/,/^else/{s/^\(\s*PKG_SOURCE:=\).*/\1${ASSET}/; s/^\(\s*PKG_HASH:=\).*/\1${HASH}/}" "$MAKEFILE"
-else
-  sed -i "/^else/,/^endif/{s/^\(\s*PKG_SOURCE:=\).*/\1${ASSET}/; s/^\(\s*PKG_HASH:=\).*/\1${HASH}/}" "$MAKEFILE"
-fi
+# Only patch the branch matching $ARCH_SUFFIX (ifeq/aarch64, else ifeq/mips,
+# or the final else/mipsel), leaving the other two untouched:
+case "$ARCH_SUFFIX" in
+  linux-arm64)
+    sed -i "/^ifeq (\$(ARCH),aarch64)/,/^else ifeq (\$(ARCH),mips)/{s/^\(\s*PKG_SOURCE:=\).*/\1${ASSET}/; s/^\(\s*PKG_HASH:=\).*/\1${HASH}/}" "$MAKEFILE"
+    ;;
+  linux-mips-24kc)
+    sed -i "/^else ifeq (\$(ARCH),mips)/,/^else$/{s/^\(\s*PKG_SOURCE:=\).*/\1${ASSET}/; s/^\(\s*PKG_HASH:=\).*/\1${HASH}/}" "$MAKEFILE"
+    ;;
+  *)
+    sed -i "/^else$/,/^endif/{s/^\(\s*PKG_SOURCE:=\).*/\1${ASSET}/; s/^\(\s*PKG_HASH:=\).*/\1${HASH}/}" "$MAKEFILE"
+    ;;
+esac
 ```
 
 This is exactly what [.github/workflows/build.yml](.github/workflows/build.yml) automates in CI via the
-`clusterduckd_version` workflow input (for the mipsel/ramips branch that the
-workflow targets).
+`clusterduckd_version` workflow input, once per matrix leg.

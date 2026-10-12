@@ -6,11 +6,12 @@ name: Build OpenWrt packages
 # actions/cache, so normal runs restore it from cache instead of
 # re-downloading/extracting it every time.
 #
-# Builds both a mipsel-24kec .ipk (ramips/mt76x8, e.g. MT76x8 routers) and
-# an arm64/aarch64 .ipk (bcm27xx/bcm2711, e.g. Raspberry Pi 4) -- the
-# clusterduckd Makefile auto-selects the matching upstream release asset
-# via $(ARCH). On push to main / workflow_dispatch (not pull_request), both
-# .ipk files are also published as assets on a GitHub Release.
+# Builds a mipsel-24kec .ipk (ramips/mt76x8, e.g. MT76x8 routers), a
+# mips-24kc .ipk (ath79/generic, e.g. AR9331 boards), and an arm64/aarch64
+# .ipk (bcm27xx/bcm2711, e.g. Raspberry Pi 4) -- the clusterduckd Makefile
+# auto-selects the matching upstream release asset via $(ARCH). On push to
+# main / workflow_dispatch (not pull_request), all three .ipk files are
+# also published as assets on a GitHub Release.
 #
 # clusterduckd ships with `option enabled '0'` by default, so the built
 # .ipk installs with the service disabled until enabled via UCI/LuCI.
@@ -104,6 +105,11 @@ jobs:
             sdk_gcc_suffix: "gcc-8.4.0_musl"
             arch_suffix: linux-mipsel-24kec
             artifact_label: mipsel-24kec
+          - target: ath79
+            subtarget: generic
+            sdk_gcc_suffix: "gcc-8.4.0_musl"
+            arch_suffix: linux-mips-24kc
+            artifact_label: mips-24kc
           - target: bcm27xx
             subtarget: bcm2711
             sdk_gcc_suffix: "gcc-8.4.0_musl"
@@ -172,12 +178,19 @@ jobs:
           MAKEFILE=package/network/services/clusterduckd/Makefile
           sed -i "s/^PKG_VERSION:=.*/PKG_VERSION:=${VERSION}/" "$MAKEFILE"
           # Only patch the branch matching this matrix job's architecture,
-          # leaving the other architecture's pinned asset/hash untouched.
-          if [ "$ARCH_SUFFIX" = "linux-arm64" ]; then
-            sed -i "/^ifeq (\$(ARCH),aarch64)/,/^else/{s/^\(\s*PKG_SOURCE:=\).*/\1${ASSET}/; s/^\(\s*PKG_HASH:=\).*/\1${HASH}/}" "$MAKEFILE"
-          else
-            sed -i "/^else/,/^endif/{s/^\(\s*PKG_SOURCE:=\).*/\1${ASSET}/; s/^\(\s*PKG_HASH:=\).*/\1${HASH}/}" "$MAKEFILE"
-          fi
+          # leaving the other two architectures' pinned assets/hashes
+          # untouched (ifeq aarch64 / else ifeq mips / else mipsel / endif).
+          case "$ARCH_SUFFIX" in
+            linux-arm64)
+              sed -i "/^ifeq (\$(ARCH),aarch64)/,/^else ifeq (\$(ARCH),mips)/{s/^\(\s*PKG_SOURCE:=\).*/\1${ASSET}/; s/^\(\s*PKG_HASH:=\).*/\1${HASH}/}" "$MAKEFILE"
+              ;;
+            linux-mips-24kc)
+              sed -i "/^else ifeq (\$(ARCH),mips)/,/^else$/{s/^\(\s*PKG_SOURCE:=\).*/\1${ASSET}/; s/^\(\s*PKG_HASH:=\).*/\1${HASH}/}" "$MAKEFILE"
+              ;;
+            *)
+              sed -i "/^else$/,/^endif/{s/^\(\s*PKG_SOURCE:=\).*/\1${ASSET}/; s/^\(\s*PKG_HASH:=\).*/\1${HASH}/}" "$MAKEFILE"
+              ;;
+          esac
 
       - name: make defconfig
         working-directory: ${{ steps.sdk.outputs.sdk_dir }}

@@ -8,17 +8,21 @@
 include $(TOPDIR)/rules.mk
 
 PKG_NAME:=clusterduckd
-PKG_VERSION:=1.2.2
+PKG_VERSION:=1.2.3
 PKG_RELEASE:=1
 
 PKG_SOURCE_URL:=https://github.com/MeshBeacon/meshbeacon-uplink/releases/download/v$(PKG_VERSION)
 
 # Upstream ships separate prebuilt static binaries per CPU architecture.
 # $(ARCH) is set by rules.mk from CONFIG_ARCH (e.g. "mipsel" for ramips/
-# mt76x8, "aarch64" for arm64 targets).
+# mt76x8, "mips" for ath79/generic -- e.g. AR9331 boards, "aarch64" for
+# arm64 targets).
 ifeq ($(ARCH),aarch64)
   PKG_SOURCE:=clusterduckd-v$(PKG_VERSION)-linux-arm64
   PKG_HASH:=f5d68cd4ee24fffee2db46066feb8f90e40116447e8d69ba9cc91a1cf291f936
+else ifeq ($(ARCH),mips)
+  PKG_SOURCE:=clusterduckd-v$(PKG_VERSION)-linux-mips-24kc
+  PKG_HASH:=95ba9cdbf4fed221f4f23d30b9f94755da9feee3b0b456a2655ab5d67fca6d34
 else
   PKG_SOURCE:=clusterduckd-v$(PKG_VERSION)-linux-mipsel-24kec
   PKG_HASH:=a0977237bfa902e28c0fb175054aa39631075380ab29ad9f548c09e7e439f6b4
@@ -43,9 +47,10 @@ define Package/clusterduckd/description
   network via a SX1302/SX1250 concentrator (USB or SPI) and forwards them to
   an MQTT broker.
   This package ships the prebuilt statically-linked binary from the
-  upstream v1.2.2 release matching the target architecture (mipsel-24kec
-  for MT76x8, arm64 for aarch64 targets), together with a UCI configuration
-  and init script which generate /etc/clusterduckd/global_conf.json.
+  upstream v$(PKG_VERSION) release matching the target architecture
+  (mipsel-24kec for MT76x8, mips-24kc for AR9331/ath79, arm64 for aarch64
+  targets), together with a UCI configuration and init script which
+  generate /etc/clusterduckd/global_conf.json.
 endef
 
 # Prebuilt binary release: nothing to compile, just download and install it.
