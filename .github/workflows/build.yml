@@ -75,10 +75,11 @@ jobs:
 
       - name: Drop our packages into the SDK tree
         run: |
-          rm -rf "${{ steps.sdk.outputs.sdk_dir }}/package/network/services/clusterduckd"
-          rm -rf "${{ steps.sdk.outputs.sdk_dir }}/package/network/services/luci-app-clusterduckd"
-          cp -r package/network/services/clusterduckd "${{ steps.sdk.outputs.sdk_dir }}/package/network/services/"
-          cp -r package/network/services/luci-app-clusterduckd "${{ steps.sdk.outputs.sdk_dir }}/package/network/services/"
+          DEST="${{ steps.sdk.outputs.sdk_dir }}/package/network/services"
+          rm -rf "$DEST/clusterduckd" "$DEST/luci-app-clusterduckd"
+          mkdir -p "$DEST"
+          cp -r package/network/services/clusterduckd "$DEST/"
+          cp -r package/network/services/luci-app-clusterduckd "$DEST/"
 
       # Overrides PKG_VERSION/PKG_HASH for this run only -- the checked-in
       # Makefile keeps its own pinned default and is never modified.
