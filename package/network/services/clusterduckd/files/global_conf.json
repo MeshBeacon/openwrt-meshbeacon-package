@@ -1,8 +1,8 @@
 {
   "SX130x_conf": {
-    "lorawan_public": true,
-    "com_type": "USB",
-    "com_path": "/dev/ttyACM0",
+    "lorawan_public": false,
+    "com_type": "SPI",
+    "com_path": "/dev/spidev0.1",
     "clksrc": 1,
     "antenna_gain": 0,
     "lbt_cfg": {
