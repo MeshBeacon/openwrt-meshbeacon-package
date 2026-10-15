@@ -21,7 +21,7 @@ define Package/luci-app-clusterduckd
   CATEGORY:=LuCI
   SUBMENU:=3. Applications
   TITLE:=LuCI support for the ClusterDuck Protocol gateway (clusterduckd)
-  DEPENDS:=+luci-base +clusterduckd
+  DEPENDS:=+luci-base +luci-compat +clusterduckd
 endef
 
 define Package/luci-app-clusterduckd/description
